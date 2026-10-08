@@ -2,3 +2,6 @@ __pycache__/
 *.pyc
 .venv/
 _organizado/
+documentos/
+exemplo/
+_web/

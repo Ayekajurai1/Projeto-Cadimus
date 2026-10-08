@@ -37,19 +37,28 @@ Opções:
 | `--recursivo` | inclui subpastas                                        |
 | `--saida DIR` | pasta de destino (padrão: `PASTA_ENTRADA/_organizado`)  |
 
+## Interface web
+
+```bash
+python app.py              # abre em http://localhost:5000
+python app.py --porta 8080
+```
+
+Na página, envie os arquivos (arrastando ou escolhendo), clique em **Organizar**, confira a tabela com o resultado e baixe tudo organizado em um `.zip`. No GitHub Codespaces, abra a porta pela aba **Portas** do VS Code.
+
 ## Resultado
 
 Dentro da pasta de saída:
 
 ```
-Notas_Fiscais/   NF_<numero>_R$<valor>.pdf
-Comprovantes/    COMP_<data>_R$<valor>.pdf   (ou COMP_NF<numero>_... quando vinculado a uma NF)
+Notas_Fiscais/   NF_<numero>_R$<valor>.pdf   (NF + comprovantes vinculados, aglutinados num só PDF)
+Comprovantes/    COMP_<data>_R$<valor>.pdf   (comprovantes sem NF correspondente)
 Revisar/         documentos que não puderam ser identificados com segurança
 Duplicados/      arquivos com conteúdo idêntico a outro
 relatorio.csv    registro de tudo o que foi feito
 ```
 
-Comprovantes são vinculados a uma NF pelo número citado no documento ou, se houver uma única nota com o mesmo valor, pelo valor.
+Comprovantes são vinculados a uma NF pelo número citado no documento ou, se houver uma única nota com o mesmo valor, pelo valor. Cada NF vinculada é aglutinada com seus comprovantes (a nota primeiro) num único PDF; imagens são convertidas para PDF. NF-e em XML fica ao lado do PDF, com o mesmo nome.
 
 ## Ajustes
 

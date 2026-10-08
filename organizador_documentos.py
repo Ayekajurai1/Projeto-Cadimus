@@ -13,8 +13,8 @@ Uso:
     python organizador_documentos.py PASTA_ENTRADA --aplicar --mover
 
 Saída (dentro de --saida, padrão: PASTA_ENTRADA/_organizado):
-    Notas_Fiscais/   NF_<numero>_R$<valor>.pdf
-    Comprovantes/    COMP_<data>_R$<valor>.pdf  (ou COMP_NF<numero>_... se vinculado)
+    Notas_Fiscais/   NF_<numero>_R$<valor>.pdf  (NF + comprovantes vinculados, num só PDF)
+    Comprovantes/    COMP_<data>_R$<valor>.pdf  (comprovantes sem NF correspondente)
     Revisar/         o que não foi possível identificar com segurança
     Duplicados/      arquivos idênticos (mesmo conteúdo)
     relatorio.csv    log de tudo que foi feito
@@ -23,6 +23,7 @@ Saída (dentro de --saida, padrão: PASTA_ENTRADA/_organizado):
 import argparse
 import csv
 import hashlib
+import logging
 import re
 import shutil
 import sys
@@ -73,7 +74,7 @@ ROTULOS_VALOR_NF = [
     r"valor\s+total\s+da\s+nota(?:\s+fiscal)?",
     r"valor\s+total\s+da\s+nfs-?e",
     r"total\s+da\s+nota",
-    r"valor\s+l[ií]quido(?:\s+da\s+nota)?",
+    r"valor\s*l[ií]quido(?:\s+da\s+nota)?",
     r"valor\s+total\s+dos\s+servi[cç]os",
     r"valor\s+dos\s+servi[cç]os",
     r"valor\s+total",
@@ -210,16 +211,40 @@ def sha256(caminho: Path) -> str:
 # Extração de campos
 # --------------------------------------------------------------------------
 
+def valor_mesma_linha(texto: str, pos: int) -> str | None:
+    """Valor logo após o rótulo, na mesma linha ("Valor total: R$ 1.500,00")."""
+    fim = texto.find("\n", pos)
+    m = re.match(r"[^\d\n]{0,25}" + RE_VALOR, texto[pos:fim if fim != -1 else None])
+    return m.group(1) if m else None
+
+
+def valor_coluna(texto: str, m: re.Match) -> str | None:
+    """Layout de tabela (ex.: DANFE): o rótulo é título de coluna e os valores estão
+    na linha de baixo. Se o rótulo é a última coluna, pega o último valor; se é a
+    primeira, o primeiro. No meio da linha a coluna é ambígua, então desiste."""
+    inicio_linha = texto.rfind("\n", 0, m.start()) + 1
+    fim_linha = texto.find("\n", m.end())
+    if fim_linha == -1:
+        return None
+    fim_prox = texto.find("\n", fim_linha + 1)
+    prox = texto[fim_linha + 1:fim_prox if fim_prox != -1 else None]
+    valores = re.findall(r"(?<![\d.,])" + RE_VALOR + r"(?![\d,])", prox)
+    if not valores:
+        return None
+    if not texto[m.end():fim_linha].strip():
+        return valores[-1]
+    if not texto[inicio_linha:m.start()].strip():
+        return valores[0]
+    return None
+
+
 def achar_valor(texto: str, rotulos) -> float | None:
-    """Procura um valor monetário logo após o rótulo (mesma linha ou seguinte)."""
+    """Procura um valor monetário associado ao rótulo (mesma linha ou coluna da tabela)."""
     for rotulo in rotulos:
-        for m in re.finditer(rotulo + r"[^\d\n]{0,25}(?:r\$)?\s*[\n ]?\s*(?:r\$)?\s*" + RE_VALOR, texto):
-            try:
-                v = valor_para_float(m.group(m.lastindex))
-                if v > 0:
-                    return v
-            except ValueError:
-                continue
+        for m in re.finditer(rotulo, texto):
+            bruto = valor_mesma_linha(texto, m.end()) or valor_coluna(texto, m)
+            if bruto and valor_para_float(bruto) > 0:
+                return valor_para_float(bruto)
     return None
 
 
@@ -392,6 +417,126 @@ def nome_livre(pasta: Path, base: str, ext: str, reservados: set[Path]) -> Path:
     return candidato
 
 
+def listar_arquivos(entrada: Path, saida: Path, recursivo: bool = False) -> list[Path]:
+    padrao = "**/*" if recursivo else "*"
+    return sorted(
+        p for p in entrada.glob(padrao)
+        if p.is_file() and p.suffix.lower() in EXTENSOES and saida not in p.parents
+    )
+
+
+def planejar(arquivos: list[Path], saida: Path, progresso=print) -> list[Documento]:
+    """Analisa os arquivos e define o destino de cada um (sem mexer em nada)."""
+    docs, vistos = [], {}
+    for i, arq in enumerate(arquivos, 1):
+        progresso(f"[{i}/{len(arquivos)}] {arq.name}")
+        d = analisar(arq)
+        if d.hash in vistos:
+            d.tipo = "duplicado"
+            d.observacao = [f"idêntico a {vistos[d.hash].name}"]
+        else:
+            vistos[d.hash] = arq
+        docs.append(d)
+
+    vincular_comprovantes([d for d in docs if d.tipo != "duplicado"])
+
+    # Comprovantes vinculados vão para o mesmo PDF da NF (aglutinação)
+    nfs = {d.numero_nf: d for d in docs if d.tipo == "nf" and d.numero_nf}
+    anexos: dict[str, list[Documento]] = {}
+    for d in docs:
+        if d.tipo == "comprovante" and d.nf_vinculada in nfs:
+            anexos.setdefault(d.nf_vinculada, []).append(d)
+
+    reservados: set[Path] = set()
+    for d in docs:
+        if d.tipo == "comprovante" and d.nf_vinculada in nfs:
+            continue  # destino definido junto com a NF
+        if d.tipo == "duplicado":
+            pasta, base = PASTA_DUP, nome_seguro(d.origem.stem)
+        else:
+            pasta, base = montar_nome(d)
+        grupo = anexos.get(d.numero_nf, []) if d.tipo == "nf" else []
+        if not grupo:
+            d.destino = nome_livre(saida / pasta, base, d.origem.suffix.lower(), reservados)
+            reservados.add(d.destino)
+            continue
+
+        # NF + comprovantes viram um só PDF; XML não cabe no PDF e fica ao lado, com o mesmo nome
+        pdf = nome_livre(saida / pasta, base, ".pdf", reservados)
+        reservados.add(pdf)
+        for membro in [d, *grupo]:
+            if mesclavel(membro.origem):
+                membro.destino = pdf
+            else:
+                membro.destino = nome_livre(saida / pasta, base, membro.origem.suffix.lower(), reservados)
+                reservados.add(membro.destino)
+        for c in grupo:
+            c.observacao.append(f"aglutinado ao PDF da NF {d.numero_nf}")
+    return docs
+
+
+def mesclavel(caminho: Path) -> bool:
+    return caminho.suffix.lower() in {".pdf", ".jpg", ".jpeg", ".png", ".tif", ".tiff"}
+
+
+def paginas_pdf(caminho: Path):
+    """Lê um PDF ou converte uma imagem em PDF (em memória) para aglutinar."""
+    import io
+    from pypdf import PdfReader
+    if caminho.suffix.lower() == ".pdf":
+        return PdfReader(str(caminho))
+    from PIL import Image, ImageSequence
+    with Image.open(caminho) as img:
+        quadros = [q.convert("RGB") for q in ImageSequence.Iterator(img)]
+    buf = io.BytesIO()
+    quadros[0].save(buf, "PDF", save_all=True, append_images=quadros[1:], resolution=150)
+    buf.seek(0)
+    return PdfReader(buf)
+
+
+def executar(docs: list[Documento], saida: Path, mover: bool = False) -> Path:
+    """Copia/move os arquivos (aglutinando NF + comprovantes) e grava o relatório.
+    Retorna o caminho do CSV."""
+    from pypdf import PdfWriter
+    logging.getLogger("pypdf").setLevel(logging.ERROR)  # PDFs de bancos costumam ter pequenos defeitos
+
+    grupos: dict[Path, list[Documento]] = {}
+    for d in docs:
+        grupos.setdefault(d.destino, []).append(d)
+
+    for destino, grupo in grupos.items():
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        if len(grupo) == 1 and grupo[0].origem.suffix.lower() == destino.suffix:
+            (shutil.move if mover else shutil.copy2)(grupo[0].origem, destino)
+            continue
+        grupo.sort(key=lambda d: d.tipo != "nf")  # NF primeiro, depois comprovantes
+        escritor = PdfWriter()
+        for d in grupo:
+            escritor.append(paginas_pdf(d.origem))
+        with open(destino, "wb") as f:
+            escritor.write(f)
+        if mover:
+            for d in grupo:
+                d.origem.unlink()
+
+    saida.mkdir(parents=True, exist_ok=True)
+    relatorio = saida / "relatorio.csv"
+    with open(relatorio, "w", newline="", encoding="utf-8-sig") as f:
+        w = csv.writer(f, delimiter=";")
+        w.writerow(["arquivo_original", "tipo", "numero_nf", "valor", "data", "nf_vinculada",
+                    "pontos_nf", "pontos_comprovante", "novo_caminho", "observacoes"])
+        for d in docs:
+            w.writerow([d.origem.name, d.tipo, d.numero_nf or "",
+                        formatar_valor(d.valor) if d.valor is not None else "",
+                        d.data or "", d.nf_vinculada or "", d.pontos_nf, d.pontos_comp,
+                        d.destino.relative_to(saida), "; ".join(d.observacao)])
+    return relatorio
+
+
+def resumir(docs: list[Documento]) -> dict[str, int]:
+    return {t: sum(1 for d in docs if d.tipo == t) for t in ("nf", "comprovante", "indefinido", "duplicado")}
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Organiza notas fiscais e comprovantes de pagamento.")
     ap.add_argument("entrada", type=Path, help="pasta com os documentos")
@@ -407,66 +552,28 @@ def main() -> int:
         return 1
     saida = (args.saida or entrada / "_organizado").resolve()
 
-    padrao = "**/*" if args.recursivo else "*"
-    arquivos = sorted(
-        p for p in entrada.glob(padrao)
-        if p.is_file() and p.suffix.lower() in EXTENSOES and saida not in p.parents
-    )
+    arquivos = listar_arquivos(entrada, saida, args.recursivo)
     if not arquivos:
         print("Nenhum documento encontrado.")
         return 0
 
     print(f"{len(arquivos)} arquivo(s) encontrado(s). {'APLICANDO' if args.aplicar else 'SIMULAÇÃO'}\n")
-
-    docs, vistos = [], {}
-    for i, arq in enumerate(arquivos, 1):
-        print(f"[{i}/{len(arquivos)}] {arq.name}")
-        d = analisar(arq)
-        if d.hash in vistos:
-            d.tipo = "duplicado"
-            d.observacao = [f"idêntico a {vistos[d.hash].name}"]
-        else:
-            vistos[d.hash] = arq
-        docs.append(d)
-
-    vincular_comprovantes([d for d in docs if d.tipo != "duplicado"])
-
-    reservados: set[Path] = set()
-    for d in docs:
-        if d.tipo == "duplicado":
-            pasta, base = PASTA_DUP, nome_seguro(d.origem.stem)
-        else:
-            pasta, base = montar_nome(d)
-        d.destino = nome_livre(saida / pasta, base, d.origem.suffix.lower(), reservados)
-        reservados.add(d.destino)
+    docs = planejar(arquivos, saida)
 
     if args.aplicar:
-        for d in docs:
-            d.destino.parent.mkdir(parents=True, exist_ok=True)
-            (shutil.move if args.mover else shutil.copy2)(d.origem, d.destino)
+        relatorio = executar(docs, saida, args.mover)
 
-    # Relatório
     print("\n" + "=" * 78)
     for d in docs:
         obs = f"  ⚠ {'; '.join(d.observacao)}" if d.observacao else ""
         print(f"{d.tipo.upper():<12} {d.origem.name}\n   → {d.destino.relative_to(saida)}{obs}")
 
     if args.aplicar:
-        saida.mkdir(parents=True, exist_ok=True)
-        with open(saida / "relatorio.csv", "w", newline="", encoding="utf-8-sig") as f:
-            w = csv.writer(f, delimiter=";")
-            w.writerow(["arquivo_original", "tipo", "numero_nf", "valor", "data", "nf_vinculada",
-                        "pontos_nf", "pontos_comprovante", "novo_caminho", "observacoes"])
-            for d in docs:
-                w.writerow([d.origem.name, d.tipo, d.numero_nf or "",
-                            formatar_valor(d.valor) if d.valor is not None else "",
-                            d.data or "", d.nf_vinculada or "", d.pontos_nf, d.pontos_comp,
-                            d.destino.relative_to(saida), "; ".join(d.observacao)])
-        print(f"\nRelatório salvo em: {saida / 'relatorio.csv'}")
+        print(f"\nRelatório salvo em: {relatorio}")
     else:
         print("\nSimulação concluída. Rode novamente com --aplicar para executar.")
 
-    resumo = {t: sum(1 for d in docs if d.tipo == t) for t in ("nf", "comprovante", "indefinido", "duplicado")}
+    resumo = resumir(docs)
     print(f"Resumo: {resumo['nf']} NF | {resumo['comprovante']} comprovantes | "
           f"{resumo['indefinido']} p/ revisar | {resumo['duplicado']} duplicados")
     return 0
