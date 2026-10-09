@@ -4,3 +4,6 @@ pypdfium2
 pytesseract
 Pillow
 flask
+requests
+waitress
+pystray; sys_platform == "win32"

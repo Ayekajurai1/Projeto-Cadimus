@@ -3,5 +3,7 @@ __pycache__/
 .venv/
 _organizado/
 documentos/
-exemplo/
 _web/
+.env
+windows/build/
+windows/dist/

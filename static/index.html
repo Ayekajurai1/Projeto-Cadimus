@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Organizador de Documentos Fiscais · FPFtech</title>
+<link rel="stylesheet" href="fontes.css">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<div class="pagina">
+  <header class="topo">
+    <img src="img/logo-fpftech.png" alt="FPFtech" width="121" height="33">
+    <div class="topo__direita">
+      <span>Organizador de Documentos Fiscais</span>
+      <div class="usuario" id="usuario" hidden></div>
+    </div>
+  </header>
+
+  <main class="conteudo">
+    <section class="intro">
+      <h1>Organizador de Documentos Fiscais</h1>
+      <div class="regua"></div>
+      <p>Envie notas fiscais e comprovantes em PDF, imagem ou XML. Cada nota fiscal é aglutinada com seus comprovantes num único PDF, nomeado com o número e o valor da nota.</p>
+    </section>
+
+    <section class="passos" id="passos"></section>
+
+    <!-- Resultado (etapa 3) -->
+    <section class="bloco" id="resultado" hidden>
+      <div class="card-concluido">
+        <div class="card-concluido__texto">
+          <span class="card-concluido__rotulo">Concluído</span>
+          <span class="card-concluido__titulo" id="titulo-resultado"></span>
+        </div>
+        <div class="acoes">
+          <button type="button" class="btn btn--contorno-claro" id="btn-reiniciar">Começar de novo</button>
+          <a class="btn btn--claro" id="btn-zip" href="#" download>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>
+            Baixar tudo (.zip)
+          </a>
+        </div>
+      </div>
+      <div class="tabela">
+        <div class="tabela__cabecalho colunas-resultado">
+          <span>Arquivo gerado</span><span class="centro">Ação</span>
+        </div>
+        <div id="lista-resultados"></div>
+      </div>
+    </section>
+
+    <!-- Envio e conferência (etapas 1 e 2) -->
+    <section class="bloco" id="entrada">
+      <input type="file" id="seletor" multiple accept=".pdf,.xml,.jpg,.jpeg,.png,.tif,.tiff" hidden>
+      <div class="zona" id="zona" role="button" tabindex="0">
+        <div class="zona__icone">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        </div>
+        <div class="zona__texto">
+          <span class="zona__titulo" id="zona-titulo">Arraste os arquivos aqui</span>
+          <span class="zona__dica">ou <span class="destaque">clique para escolher</span> · PDF, JPG, PNG ou XML</span>
+        </div>
+      </div>
+
+      <div class="campo-pasta">
+        <label for="pasta">Ou informe uma pasta</label>
+        <div class="campo-pasta__linha">
+          <div class="campo-pasta__entrada">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--graphite-500)" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>
+            <input id="pasta" autocomplete="off" placeholder="C:\Notas\2026\Outubro  ou  https://drive.google.com/…">
+          </div>
+          <button type="button" class="btn btn--neutro" id="btn-pasta" disabled>Adicionar pasta</button>
+        </div>
+        <span class="ajuda">Caminho local ou de rede, ou link compartilhado (Google Drive, OneDrive, SharePoint).</span>
+        <span class="ajuda erro" id="pasta-erro" hidden></span>
+        <div class="tabela" id="tabela-pastas" hidden>
+          <div id="lista-pastas"></div>
+        </div>
+      </div>
+
+      <div class="arquivos" id="bloco-arquivos" hidden>
+        <div class="tabela">
+          <div class="tabela__cabecalho colunas-arquivo">
+            <span>Formato</span><span id="titulo-arquivos">Arquivo</span><span class="centro">Tipo</span><span></span>
+          </div>
+          <div id="lista-arquivos"></div>
+        </div>
+        <span class="ajuda">Clique no tipo para corrigir a classificação automática.</span>
+      </div>
+
+      <div class="barra">
+        <span id="status" class="barra__status"></span>
+        <div class="acoes">
+          <button type="button" class="btn btn--neutro" id="btn-exemplo">Carregar exemplo</button>
+          <button type="button" class="btn btn--primario" id="btn-organizar" disabled>
+            <span id="rotulo-organizar">Organizar documentos</span>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="rodape">
+    <span>2026 © Amazônia Tech Park | Todos os direitos reservados</span>
+    <img src="img/logo-fpftech-rodape.png" alt="FPFtech" width="65" height="18">
+  </footer>
+</div>
+<script src="app.js"></script>
+</body>
+</html>
